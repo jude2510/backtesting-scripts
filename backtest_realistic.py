@@ -18,7 +18,7 @@ Usage:
 
 import argparse          # standard library module for building the command-line interface
 import sys               # standard library module used to exit with an error message
-from typing import Optional, Tuple  # type annotations that allow None values and tuples
+from typing import Optional, Tuple, cast  # type annotations that allow None values and tuples
 import numpy as np       # numerical library used for square-root and array operations
 import pandas as pd      # data-analysis library used to manage the price time series
 
@@ -51,7 +51,7 @@ def fetch_ohlcv(
     if raw.empty:
         sys.exit(f"No data for '{ticker}'. Check the ticker symbol and date range.")  # stop if Yahoo returned nothing
 
-    return raw[["Open", "High", "Low", "Close", "Volume"]]  # keep only the price/volume columns we need
+    return pd.DataFrame(raw[["Open", "High", "Low", "Close", "Volume"]])  # keep only the price/volume columns we need
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ def simulate(
 
     # --- Compute the two moving averages ---
     df["short_sma"] = df["Close"].rolling(short_window).mean()  # rolling average of the last short_window closing prices
-    df["long_sma"]  = df["Close"].rolling(long_window).mean()   # rolling average of the last long_window closing prices
+    df["long_sma"] = df["Close"].rolling(long_window).mean()   # rolling average of the last long_window closing prices
 
     # --- Generate the raw signal ---
     # 1 means "we want to be long today", 0 means "we want to be flat today"
@@ -113,12 +113,12 @@ def simulate(
     df["trade_signal"] = df["signal"].diff().fillna(0)  # fillna handles the very first row where diff() is undefined
 
     # --- Portfolio simulation ---
-    cash   = float(initial_capital)  # start with all money in cash
+    cash = float(initial_capital)  # start with all money in cash
     shares = 0.0                     # no shares held at the start
     entry_price = None               # price at which the current long position was entered
-    entry_date  = None               # date the current position was opened
+    entry_date = None               # date the current position was opened
     portfolio_values = []            # daily total account value (cash + market value of shares)
-    trades_log       = []            # record of every completed round-trip trade
+    trades_log = []            # record of every completed round-trip trade
 
     for date, row in df.iterrows():  # iterate over every trading day in chronological order
         signal = row["trade_signal"]  # +1, -1, or 0 for today
@@ -126,18 +126,19 @@ def simulate(
         # BUY: signal flipped from 0 → 1 and we are currently flat
         if signal > 0.5 and shares == 0:
             # We pay a slightly higher price than the open due to slippage (market impact)
-            fill = row["Open"] * (1 + slippage)          # effective buy price after slippage
+            fill = float(row["Open"]) * (1 + slippage)  # type: ignore[arg-type]  # iterrows yields scalars at runtime
             affordable = max(0.0, cash - commission)      # deduct commission upfront from available cash
             shares = affordable / fill                    # number of shares we can buy with remaining cash
-            cash   = 0.0                                 # all cash is now deployed into shares
+            cash = 0.0                                 # all cash is now deployed into shares
             entry_price = fill                           # remember the entry price for later P&L calculation
-            entry_date  = date                           # remember the entry date for the trade log
+            entry_date = date                           # remember the entry date for the trade log
 
         # SELL: signal flipped from 1 → 0 and we currently hold shares
         elif signal < -0.5 and shares > 0:
             # We receive a slightly lower price than the open due to slippage
-            fill     = row["Open"] * (1 - slippage)      # effective sell price after slippage
+            fill = float(row["Open"]) * (1 - slippage)  # type: ignore[arg-type]  # iterrows yields scalars at runtime
             proceeds = shares * fill - commission         # total cash received minus commission
+            assert entry_price is not None
             trade_return_pct = (fill / entry_price - 1) * 100  # percentage gain or loss on this trade
 
             trades_log.append({
@@ -148,16 +149,16 @@ def simulate(
                 "return_%":     round(trade_return_pct, 2),   # profit or loss as a percentage
             })
 
-            cash   = max(0.0, proceeds)  # update cash balance (floor at 0 to handle edge cases)
+            cash = max(0.0, proceeds)  # update cash balance (floor at 0 to handle edge cases)
             shares = 0.0                 # we are now flat
             entry_price = None
-            entry_date  = None
+            entry_date = None
 
         # Mark the portfolio to market: cash + current value of any open position
         portfolio_values.append(cash + shares * row["Close"])  # use today's close as the fair value of held shares
 
     portfolio = pd.Series(portfolio_values, index=df.index, name="portfolio")  # daily account value as a time series
-    trades    = pd.DataFrame(trades_log)                                        # one row per completed round trip
+    trades = pd.DataFrame(trades_log)                                        # one row per completed round trip
 
     return portfolio, trades, df
 
@@ -171,20 +172,20 @@ def compute_metrics(portfolio: pd.Series, risk_free_rate: float) -> dict:
     returns = portfolio.pct_change().dropna()  # day-over-day percentage change in portfolio value
 
     total_ret = (portfolio.iloc[-1] / portfolio.iloc[0] - 1) * 100              # overall % gain over the full period
-    ann_ret   = ((1 + total_ret / 100) ** (TRADING_DAYS / len(returns)) - 1) * 100  # CAGR: annualised compound return
-    ann_vol   = returns.std() * np.sqrt(TRADING_DAYS) * 100                     # annualised volatility (risk)
+    ann_ret = ((1 + total_ret / 100) ** (TRADING_DAYS / len(returns)) - 1) * 100  # CAGR: annualised compound return
+    ann_vol = returns.std() * np.sqrt(TRADING_DAYS) * 100                     # annualised volatility (risk)
 
     daily_rf = risk_free_rate / TRADING_DAYS                                     # daily equivalent of the annual risk-free rate
-    excess   = returns - daily_rf                                                 # daily return above the risk-free rate
-    sharpe   = (excess.mean() / excess.std()) * np.sqrt(TRADING_DAYS) if excess.std() > 0 else float("nan")  # Sharpe: reward per unit of risk
+    excess = returns - daily_rf                                                 # daily return above the risk-free rate
+    sharpe = (excess.mean() / excess.std()) * np.sqrt(TRADING_DAYS) if excess.std() > 0 else float("nan")  # Sharpe: reward per unit of risk
 
-    cumulative   = portfolio / portfolio.iloc[0]                  # normalise portfolio to start at 1.0
+    cumulative = portfolio / portfolio.iloc[0]                  # normalise portfolio to start at 1.0
     rolling_peak = cumulative.cummax()                            # highest portfolio value seen up to each date
-    drawdown     = (cumulative - rolling_peak) / rolling_peak     # fractional decline from the running peak
+    drawdown = (cumulative - rolling_peak) / rolling_peak     # fractional decline from the running peak
 
-    mdd          = drawdown.min() * 100                           # worst drawdown as a percentage
-    trough_date  = drawdown.idxmin()                              # date the portfolio hit its lowest relative point
-    peak_date    = rolling_peak[:trough_date].idxmax()            # date of the highest point before that trough
+    mdd = drawdown.min() * 100                           # worst drawdown as a percentage
+    trough_date = drawdown.idxmin()                              # date the portfolio hit its lowest relative point
+    peak_date = rolling_peak[:trough_date].idxmax()            # date of the highest point before that trough
 
     return {
         "total_return": total_ret,
@@ -211,8 +212,8 @@ def print_results(
     label: str,
 ) -> None:
     # Prints a formatted block of backtest results for one simulation run
-    start_date = portfolio.index[0].date()  # first date in the price series
-    end_date   = portfolio.index[-1].date() # last date in the price series
+    start_date = cast(pd.Timestamp, portfolio.index[0]).date()  # first date in the price series
+    end_date = cast(pd.Timestamp, portfolio.index[-1]).date()  # last date in the price series
 
     print(f"\n{'='*62}")
     print(f"  {label}")
@@ -237,13 +238,13 @@ def print_results(
 
     # Per-trade statistics (only if at least one round trip completed)
     if not trades.empty:
-        win_rate       = (trades["return_%"] > 0).mean() * 100  # percentage of trades that were profitable
-        avg_ret        = trades["return_%"].mean()               # average return per trade
-        best_trade     = trades["return_%"].max()                # single best trade
-        worst_trade    = trades["return_%"].min()                # single worst trade
+        win_rate = (trades["return_%"] > 0).mean() * 100  # percentage of trades that were profitable
+        avg_ret = trades["return_%"].mean()               # average return per trade
+        best_trade = trades["return_%"].max()                # single best trade
+        worst_trade = trades["return_%"].min()                # single worst trade
         time_in_market = (df["signal"] > 0).mean() * 100        # fraction of days holding a position
 
-        print(f"\n  --- Trade summary ---")
+        print("\n  --- Trade summary ---")
         print(f"  Completed trades    : {len(trades)}")
         print(f"  Win rate            : {win_rate:.1f}%")
         print(f"  Avg trade return    : {avg_ret:+.2f}%")
@@ -251,7 +252,7 @@ def print_results(
         print(f"  Worst trade         : {worst_trade:+.2f}%")
         print(f"  Time in market      : {time_in_market:.1f}%")
     else:
-        print(f"\n  No completed trades — try a shorter SMA window or a longer lookback period.")
+        print("\n  No completed trades — try a shorter SMA window or a longer lookback period.")
 
     print(f"{'='*62}")
 
@@ -259,7 +260,7 @@ def print_results(
 def print_comparison(ideal: dict, real: dict) -> None:
     # Prints a side-by-side delta table so the user can see the cost of realistic execution
     print(f"\n{'='*62}")
-    print(f"  Execution cost: Ideal → Realistic")
+    print("  Execution cost: Ideal → Realistic")
     print(f"{'='*62}")
 
     rows = [
@@ -270,10 +271,10 @@ def print_comparison(ideal: dict, real: dict) -> None:
     ]
 
     for label, key, unit in rows:
-        iv    = ideal[key]                                        # value under ideal conditions
-        rv    = real[key]                                         # value under realistic conditions
+        iv = ideal[key]                                        # value under ideal conditions
+        rv = real[key]                                         # value under realistic conditions
         delta = rv - iv                                           # difference (negative = friction hurt)
-        sign  = "+" if delta >= 0 else ""
+        sign = "+" if delta >= 0 else ""
         print(f"  {label:<22}: {iv:+.3f}{unit}  →  {rv:+.3f}{unit}  (Δ {sign}{delta:.3f}{unit})")
 
     print(f"{'='*62}\n")
@@ -361,7 +362,7 @@ def main() -> None:
     )
 
     ideal_metrics = compute_metrics(ideal_portfolio, args.risk_free_rate)  # summary stats for the ideal run
-    real_metrics  = compute_metrics(real_portfolio,  args.risk_free_rate)  # summary stats for the realistic run
+    real_metrics = compute_metrics(real_portfolio,  args.risk_free_rate)  # summary stats for the realistic run
 
     # Print ideal results first as the benchmark
     print_results(

@@ -67,15 +67,15 @@ def run_backtest(ticker: str, start: Optional[str], end: Optional[str], period: 
     returns = prices.pct_change().dropna()             # compute day-over-day percentage change; drop the first NaN (no prior day on day 1)
 
     sr = sharpe_ratio(returns, risk_free_rate)         # compute the annualised Sharpe ratio
-    mdd, peak_date, trough_date = max_drawdown(prices) # compute max drawdown and its peak/trough dates
+    mdd, peak_date, trough_date = max_drawdown(prices)   # compute max drawdown and its peak/trough dates
 
     total_return = (prices.iloc[-1] / prices.iloc[0] - 1) * 100           # overall % gain from first to last price
     ann_return = ((1 + total_return / 100) ** (TRADING_DAYS / len(returns)) - 1) * 100  # compound annual growth rate (CAGR)
     ann_vol = returns.std() * np.sqrt(TRADING_DAYS) * 100                  # annualise daily volatility by scaling by sqrt(252)
 
-    print(f"\n{'='*50}")                                                          
+    print(f"\n{'='*50}")
     print(f"  Backtest: {ticker}  |  {prices.index[0].date()} → {prices.index[-1].date()}")
-    print(f"{'='*50}")                                                            
+    print(f"{'='*50}")
     print(f"  Total return        : {total_return:+.2f}%")                        # total % return over the period (+ or - sign always shown)
     print(f"  Annualised return   : {ann_return:+.2f}%")                          # CAGR: what the return looks like on a per-year basis
     print(f"  Annualised vol      : {ann_vol:.2f}%")                              # annualised standard deviation of daily returns (a measure of risk)
@@ -83,7 +83,7 @@ def run_backtest(ticker: str, start: Optional[str], end: Optional[str], period: 
     print(f"  Maximum drawdown    : {mdd*100:.2f}%")                              # worst peak-to-trough loss expressed as a percentage
     print(f"    Peak              : {peak_date.date()}")                           # date the price reached its high before the worst drop
     print(f"    Trough            : {trough_date.date()}")                         # date the price hit its lowest point during the worst drop
-    print(f"{'='*50}\n")                                                           
+    print(f"{'='*50}\n")
 
 
 def main() -> None:
